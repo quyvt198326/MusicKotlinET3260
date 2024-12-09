@@ -1,20 +1,30 @@
 package net.braniumacademy.musicapplication
 
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.view.View.GONE
+import android.view.View.VISIBLE
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.ui.setupWithNavController
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.snackbar.Snackbar
 import net.braniumacademy.musicapplication.databinding.ActivityMainBinding
 import net.braniumacademy.musicapplication.ui.home.HomeViewModel
+import net.braniumacademy.musicapplication.ui.viewmodel.PermissionViewModel
 import net.braniumacademy.musicapplication.ui.viewmodel.SharedViewModel
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var sharedPreferences: SharedPreferences
     private var currentSongLoaded = false
+
     private val sharedViewModel: SharedViewModel by viewModels {
         val application = application as MusicApplication
         SharedViewModel.Factory(
@@ -22,10 +32,26 @@ class MainActivity : AppCompatActivity() {
             application.getRecentSongRepository()
         )
     }
+
     private val homeViewModel: HomeViewModel by viewModels {
         val application = application as MusicApplication
         HomeViewModel.Factory(application.getSongRepository())
     }
+
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (!isGranted) {
+                val snackBar = Snackbar.make(
+                    binding.root.rootView,
+                    getString(R.string.permission_denied),
+                    Snackbar.LENGTH_LONG
+                )
+                snackBar.setAnchorView(R.id.nav_view)
+                snackBar.show()
+            } else {
+                PermissionViewModel.instance.grantPermission()
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,6 +60,17 @@ class MainActivity : AppCompatActivity() {
         setupBottomNav()
         setupComponents()
         observeData()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        sharedViewModel.playingSong.observe(this) {
+            if (it.song != null) {
+                binding.fcvMiniPlayer.visibility = VISIBLE
+            } else {
+                binding.fcvMiniPlayer.visibility = GONE
+            }
+        }
     }
 
     override fun onStop() {
@@ -71,6 +108,38 @@ class MainActivity : AppCompatActivity() {
                 loadPreviousSessionSong()
                 currentSongLoaded = true
             }
+        }
+        PermissionViewModel.instance
+            .permissionAsked
+            .observe(this) {
+                if (it) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        checkPostNotificationPermission()
+                    }
+                }
+            }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun checkPostNotificationPermission() {
+        val permission = android.Manifest.permission.POST_NOTIFICATIONS
+        val isPermissionGranted = ActivityCompat
+            .checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+        if (isPermissionGranted) {
+            PermissionViewModel.instance.grantPermission()
+        } else if (ActivityCompat.shouldShowRequestPermissionRationale(this, permission)) {
+            val snackBar = Snackbar.make(
+                binding.root.rootView,
+                getString(R.string.permission_denied),
+                Snackbar.LENGTH_LONG
+            )
+            snackBar.setAction(R.string.action_agree) {
+                permissionLauncher.launch(permission)
+            }
+            snackBar.setAnchorView(R.id.nav_view)
+            snackBar.show()
+        } else {
+            permissionLauncher.launch(permission)
         }
     }
 
